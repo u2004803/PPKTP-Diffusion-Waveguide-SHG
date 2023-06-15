@@ -1,0 +1,964 @@
+import numpy as np
+import math
+import tkinter as tk
+import re
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+
+#Constants Value
+c   = 3E8           #Speed of light
+e0  = 8.854E-12     #Free space permittivity
+
+#From Bierlein, J. D., & Vanherzeele, H. (1989). Potassium titanyl phosphate: properties and new applications. JOSA B, 6(4), 622-633.
+def sellmeier(axis, wavelength):
+  wavelength *= 1E6
+  if axis == 'x':
+    A = 2.1146
+    B = 0.89188
+    C = 0.20861
+    D = 0.01320
+  elif axis == 'y':
+    A = 2.1518
+    B = 0.87862
+    C = 0.21801
+    D = 0.01327
+  elif axis == 'z':
+    A = 2.3136
+    B = 1.00012
+    C = 0.23831
+    D = 0.01679
+  return np.sqrt(A + (B / (1 - (C / wavelength) ** 2)) - D  * (wavelength ** 2))
+
+#From Eastern South Observatory
+def thermo_optic(axis, wavelength, temperature):
+  wavelength *= 1E6
+  if axis == 'x':
+    a = 1.427
+    b = -4.735
+    c = 8.711
+    d = 0.952
+  if axis == 'y':
+    a = 4.269
+    b = -14.761
+    c = 21.232
+    d = -2.113
+  if axis == 'z':
+    a = 12.415
+    b = -44.414
+    c = 59.129
+    d = -12.101
+  return ((a * (wavelength**-3)) + (b * (wavelength**-2)) + (c * (wavelength**-1)) + d) * (10**-6) * temperature
+
+# Diffusion profile along crystal Z axis
+# taken from Roelofs, M. G., Suna, A., Bindloss, W., & Bierlein, J. D. (1994). Characterization of optical waveguides in KTiOPO4 by second harmonic spectroscopy. Journal of applied physics, 76(9), 4999-5006.
+def delta_n(diff_n, z, d):
+  return diff_n * math.erfc(z / d)
+
+def phasematch(pol, nf1, nf2, nsh, wf, wsh):
+  return (2 * np.pi * nsh / wsh) - (2 * np.pi * nf1 / wf) - (2 * np.pi * nf2 / wf) - (2 * np.pi / pol)
+
+def validate_entry(value):
+  if value == "":
+    return True
+
+  try:
+    float(value)
+    return True
+  except ValueError:
+    if value[-1].lower() == "e" and len(value) > 1 and "e" not in value[:-1].lower():
+      return True
+    elif value[-1] == "-" and value[-2].lower() == "e":
+      return True
+    else:
+      return False
+
+
+#Now we focus on function allowing switching calculations based on radiobutton clicked
+def update_input_widgets():
+  global input_widgets
+  selected_type = calculation_type.get()
+
+  for widget in input_widgets:
+    widget.place_forget()
+
+  if selected_type == "calculation_type_1":
+    widget_removal()
+    input_widgets = create_input_radio1()
+  elif selected_type == "calculation_type_2":
+    widget_removal()
+    input_widgets = create_input_radio2()
+  elif selected_type == "calculation_type_3":
+    widget_removal()
+    input_widgets = create_input_radio3()
+  elif selected_type == "calculation_type_4":
+    widget_removal()
+    input_widgets = create_input_radio4()
+  elif selected_type == "calculation_type_5":
+    widget_removal()
+    input_widgets = create_input_radio5()
+
+  for widget in input_widgets:
+    widget.place()
+
+#Now we focus on the first parameter : Refractive index
+#Using known parameter : Wavelength, Poling Period
+root = tk.Tk()
+root.title("PPKTP Waveguide Poling Period Calculations")
+root.geometry("700x600")
+
+calc1_sol1 = tk.Label(text="", font=('Arial', 12))
+calc1_sol2 = tk.Label(text="", font=('Arial', 12))
+calc2_sol1 = tk.Label(text="", font=('Arial', 12))
+calc3_sol1 = tk.Label(text="", font=('Arial', 12))
+calc3_sol2 = tk.Label(text="", font=('Arial', 12))
+calc3_sol3 = tk.Label(text="", font=('Arial', 12))
+calc3_sol4 = tk.Label(text="", font=('Arial', 12))
+calc3_sol5 = tk.Label(text="", font=('Arial', 12))
+calc3_sol6 = tk.Label(text="", font=('Arial', 12))
+calc4_sol1 = tk.Label(text="", font=('Arial', 12))
+calc4_sol2 = tk.Label(text="", font=('Arial', 12))
+calc4_sol3 = tk.Label(text="", font=('Arial', 12))
+
+def widget_removal():
+    calc1_sol1.config(text="", font=('Arial', 12))
+    calc1_sol2.config(text="", font=('Arial', 12))
+    calc2_sol1.config(text="", font=('Arial', 12))
+    calc3_sol1.config(text="", font=('Arial', 12))
+    calc3_sol2.config(text="", font=('Arial', 12))
+    calc3_sol3.config(text="", font=('Arial', 12))
+    calc3_sol4.config(text="", font=('Arial', 12))
+    calc3_sol5.config(text="", font=('Arial', 12))
+    calc3_sol6.config(text="", font=('Arial', 12))
+    calc4_sol1.config(text="", font=('Arial', 12))
+    calc4_sol2.config(text="", font=('Arial', 12))
+    calc4_sol3.config(text="", font=('Arial', 12))
+
+
+
+
+def Calculate():
+  selected_type = calculation_type.get()
+  if selected_type == "calculation_type_1":
+    calc1_sol1.config(text="", font=('Arial', 12))
+    calc1_sol2.config(text="", font=('Arial', 12))
+
+    #Get the input values for calculation type 1
+    wfval = float(input_widgets[1].get())
+    nf1val = float(input_widgets[3].get())
+    nf2val = float(input_widgets[5].get())
+    nshval = float(input_widgets[7].get())
+    wshval = wfval/2
+    # Perform the calculation for calculation type 1
+
+    amount = ""
+    if nf1val == "" or nf2val == "" or nshval == "":
+      amount = "Please make sure you input all the required value"
+
+    amount = round((2 * np.pi) / ((2 * np.pi * nshval / wshval) - (2 * np.pi * nf1val / wfval) - (2 * np.pi * nf2val / wfval)),9)
+
+    if amount < 0:
+      calc1_sol2.config(text="The calculated poling period is less than 0, please try other value", font=('Arial', 12))
+    else:
+      calc1_sol1.config(text=f"{amount}", font=('Arial', 12))
+
+    calc1_sol1.place(x=250, y=290)
+    calc1_sol2.place(x=250, y=320)
+
+  elif selected_type == "calculation_type_2":
+      calc2_sol1.config(text="", font=('Arial', 12))
+
+      userpolval = float(input_widgets[1].get())
+      usertempval = float(input_widgets[3].get())
+      acttempval = float(input_widgets[5].get())
+      alphaval = input_widgets[7].get()
+
+
+      if alphaval == "":
+          polingarr = pol_arrange.get()
+          if polingarr == "x":
+            alphaval = 9.44E-6
+          elif polingarr == "y":
+            alphaval = 12.49E-6
+          elif polingarr == "z":
+            alphaval = -4.16E-6
+      else:
+          alphaval = float(alphaval)
+
+      amount = round(alphaval * userpolval * (acttempval - usertempval) + userpolval,9)
+
+      calc2_sol1.config(text=f"{amount}", font=('Arial', 12))
+      calc2_sol1.place(x=250, y=290)
+
+  elif selected_type == "calculation_type_3":
+    calc3_sol1.config(text="", font=('Arial', 12))
+    calc3_sol2.config(text="", font=('Arial', 12))
+    calc3_sol3.config(text="", font=('Arial', 12))
+    calc3_sol4.config(text="", font=('Arial', 12))
+    calc3_sol5.config(text="", font=('Arial', 12))
+    calc3_sol6.config(text="", font=('Arial', 12))
+
+    tempval = float(input_widgets[1].get())
+    wfval = float(input_widgets[3].get())
+    polval = float(input_widgets[5].get())
+    diff_nyval = float(input_widgets[7].get())
+    diff_nzval = input_widgets[9].get()
+    dval = float(input_widgets[11].get())
+    zval = input_widgets[13].get()
+    wshval = wfval/2
+
+    amount = ""
+    c = False
+    d = False
+#Here we make sure diffusion depth and step refractive index increase value is defined
+    if zval == "" and diff_nzval == "":
+      amount = "Enter z-depth or step refractive index"
+    elif zval == "" and diff_nzval != "":
+      zval = dval
+    elif diff_nzval == "" and zval != "":
+      diff_nzval = 0.024
+    else:
+      c = True
+      d = True
+
+    if diff_nzval != "":
+      diff_nzval = float(diff_nzval)
+
+    if zval != "":
+      zval = float(zval)
+
+#Calculations based on either diffusion-depth or step increase refractive index defined
+#When only step increase refractive index was defined
+    if zval == dval and diff_nzval != "":
+      n = 10000
+      z_list = np.zeros(n)
+      phasematch_list = np.zeros(n)
+
+      nf1val = sellmeier("y", wfval) + diff_nyval + thermo_optic("y", wfval, tempval)
+      nshval = sellmeier("y", wshval) + diff_nyval + thermo_optic("y", wshval, tempval)
+
+      for i in range(n):
+        z_list[i] = zval
+        nf2val = sellmeier("z", wfval) + delta_n(diff_nzval, zval, dval) + thermo_optic("z", wfval, tempval)
+        phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wfval, wshval)
+
+
+        if i == n-1 and a >= 0:
+          amount = "No suitable diffusion depth"
+          z = zval
+
+        # To determine whether phase matching value reaches 0
+        if i > 0:
+          a = phasematch_list[i - 1] * phasematch_list[i]
+          # Setting up conditional to stop the iterations once it reaches root
+          if a < 0:
+            c = True
+            if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+              val1 = i
+            else:
+              val1 = i - 1
+            zval = z_list[val1]
+            break
+
+        zval += 4E-6 / n  # Increased until original z is twice its value (Maximum value of z)
+
+
+    elif zval != "" and diff_nzval == 0.024:
+
+      nf1val = sellmeier("y", wfval) + diff_nyval + thermo_optic("y", wfval, tempval)
+      nshval = sellmeier("y", wshval) + diff_nyval + thermo_optic("y", wshval, tempval)
+
+
+      # To determine diff_nz based on other existing variables
+      # Known largest value of diff_nz : 0.024
+      zval = float(zval)
+      n = 100000
+      diff_nz_list = np.zeros(n)
+      phasematch_list = np.zeros(n)
+
+      for i in range(n):
+        diff_nz_list[i] = diff_nzval
+        nf2val = sellmeier("z", wfval) + delta_n(diff_nzval, zval, dval) + thermo_optic("z", wfval, tempval)
+        phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wfval, wshval)
+
+        if i == n and a >= 0:
+          amount = "No suitable step refractive index"
+
+        # To determine whether the phase matching value reaches 0
+        if i > 0:
+          a = phasematch_list[i-1] * phasematch_list[i]
+          # Setting up conditional to stop the iterations once it reaches root
+          if a < 0:
+            d = True
+            if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+              val1 = i
+            else:
+              val1 = i - 1
+            diff_nzval = diff_nz_list[val1]
+            break
+
+        diff_nzval -= diff_nz_list[0] / n
+
+    elif zval == diff_nzval == "":
+      zval = None
+      diff_nzval = None
+      nf1val = None
+      nf2val = None
+      nshval = None
+      amount = "Please input either z-depth or diff_nz for calculations"
+
+
+    if c == True and d == False:
+      zval = round(z_list[val1], 10)
+      nf1val = round(sellmeier("y", wfval) + diff_nyval + thermo_optic("y", wfval, tempval),5)
+      nf2val = round(sellmeier("z", wfval) + delta_n(diff_nzval, zval, dval) + thermo_optic("z", wfval, tempval),5)
+      nshval = round(sellmeier("y", wshval) + diff_nyval + thermo_optic("y", wshval, tempval),5)
+    elif c == False and d == True:
+      diff_nzval = round(diff_nz_list[val1], 4)
+      nf1val = round(sellmeier("y", wfval) + diff_nyval + thermo_optic("y", wfval, tempval), 5)
+      nf2val = round(sellmeier("z", wfval) + delta_n(diff_nzval, zval, dval) + thermo_optic("z", wfval, tempval), 5)
+      nshval = round(sellmeier("y", wshval) + diff_nyval + thermo_optic("y", wshval, tempval), 5)
+    elif c == True and d == True:
+      nf1val = round(sellmeier("y", wfval) + diff_nyval + thermo_optic("y", wfval, tempval), 5)
+      nf2val = round(sellmeier("z", wfval) + delta_n(diff_nzval, zval, dval) + thermo_optic("z", wfval, tempval), 5)
+      nshval = round(sellmeier("y", wshval) + diff_nyval + thermo_optic("y", wshval, tempval), 5)
+    else:
+        zval = None
+        nf1val = None
+        nf2val = None
+        nshval = None
+
+
+    calc3_sol1.config(text=f"{zval}", font=('Arial', 12))
+    calc3_sol2.config(text=f"{diff_nzval}", font=('Arial', 12))
+    calc3_sol3.config(text=f"{nf1val}", font=('Arial', 12))
+    calc3_sol4.config(text=f"{nf2val}", font=('Arial', 12))
+    calc3_sol5.config(text=f"{nshval}", font=('Arial', 12))
+    calc3_sol6.config(text=f"{amount}", font=('Arial', 12))
+
+    calc3_sol1.place(x=400, y=350)
+    calc3_sol2.place(x=400, y=380)
+    calc3_sol3.place(x=400, y=410)
+    calc3_sol4.place(x=400, y=440)
+    calc3_sol5.place(x=400, y=470)
+    calc3_sol6.place(x=300, y=500)
+
+  elif selected_type == "calculation_type_4":
+    calc4_sol1.config(text="", font=('Arial', 12))
+    calc4_sol2.config(text="", font=('Arial', 12))
+    calc4_sol3.config(text="", font=('Arial', 12))
+
+    # Get the input values for calculation type 4
+    polval = float(input_widgets[1].get())
+    nf1val = float(input_widgets[3].get())
+    nf2val = float(input_widgets[5].get())
+    nshval = float(input_widgets[7].get())
+    wfval = 1000E-9
+    wshval = wfval/2
+
+    amount = ""
+
+    # Perform the calculation for calculation type 4
+    # Now configuring the required wavelength for the SHG
+    n = 100000
+    phasematch_list = np.zeros(n)
+    b = False
+
+    wf_list = np.zeros(n)
+    wsh_list = np.zeros(n)
+    wf_list[0] = 1000E-9
+    wsh_list[0] = 500E-9
+
+
+    for i in range(1, n):
+      wfval += wf_list[0] / n  # Increased until original z is twice its value (Maximum value of z)\
+      wshval = wfval / 2
+      wf_list[i] = wfval
+      wsh_list[i] = wshval
+      phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wf_list[i], wsh_list[i])
+
+
+      if i > 0:
+        a = phasematch_list[i-1] * phasematch_list[i]
+
+        # Setting up conditional to stop the iterations once it reaches root
+      if a < 0:
+        if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+          val1 = i
+        else:
+          val1 = i - 1
+          amount = ""
+
+        wf = round(wf_list[val1], 11)
+        wsh = round(wf / 2, 11)
+        break
+
+
+      if i == n-1 and a >= 0:
+        b = True
+
+
+    # In case increasing wavelength is not possible :
+    if b:
+      wfval = 1000E-9
+      wf_list[0] = 1000E-9
+      wsh_list[0] = 500E-9
+      for i in range(1, n):
+        wfval -= wf_list[0] / n  # Increased until original z is twice its value (Maximum value of z)\
+        wshval = wfval / 2
+        wf_list[i] = wfval
+        wsh_list[i] = wshval
+        phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wf_list[i], wsh_list[i])
+
+        if i > 0:
+          a = phasematch_list[i - 1] * phasematch_list[i]
+
+        # Setting up conditional to stop the iterations once it reaches root
+        if a < 0:
+          if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+            val1 = i
+          else:
+            val1 = i - 1
+
+          wf = round(wf_list[val1],11)
+          wsh = round(wf / 2, 11)
+          break
+
+        #Setting up conditional to determine whether the phase matching is possible for this wavelength
+
+      if i == n - 1 and a >= 0:
+        amount = "No Phase Matching Wavelength"
+        wf = None
+        wsh = None
+
+    calc4_sol1.config(text=f"{wf}", font=('Arial', 12))
+    calc4_sol2.config(text=f"{wsh}", font=('Arial', 12))
+    calc4_sol3.config(text=f"{amount}", font=('Arial', 12))
+
+    calc4_sol1.place(x=400, y=290)
+    calc4_sol2.place(x=400, y=320)
+    calc4_sol3.place(x=400, y=350)
+
+  elif selected_type == "calculation_type_5":
+    polval = float(input_widgets[1].get())
+    nf1val = float(input_widgets[3].get())
+    nf2val = float(input_widgets[5].get())
+    nshval = float(input_widgets[7].get())
+    wfval = float(input_widgets[9].get())
+    wshval = wfval / 2
+    lenval = float(input_widgets[11].get())
+    powval = float(input_widgets[13].get())
+    areaval = float(input_widgets[15].get())
+    deffval = float(input_widgets[17].get())
+
+    wfnew = wfval
+    wshnew = wshval
+
+    def conv(a):
+      b = (32 * (deffval ** 2) * (lenval ** 2) * powval * ((np.sinc(math.radians(a * lenval / 2))) ** 2)) / ((wfval ** 2) * (nf2val ** 2) * nshval * 2.6562E-3 * areaval)
+      return b
+
+    # Perform the calculation for calculation type 4
+    # Now configuring the required wavelength for the SHG
+    n = 100000
+    phasematch_list = np.zeros(n)
+    b = False
+    c = False
+
+    wf_list = np.zeros(n)
+    wsh_list = np.zeros(n)
+    wf_list[0] = wfnew
+    wsh_list[0] = wshnew
+
+    pwf = 0
+    pwsh = pwf / 2
+
+    for i in range(1, n):
+      wfval += 40E-9 / n
+      wshval = wfval / 2
+      wf_list[i] = wfval
+      wsh_list[i] = wshval
+      phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wf_list[i], wsh_list[i])
+
+      if i > 0:
+        a = phasematch_list[i - 1] * phasematch_list[i]
+
+      if a < 0:
+        c = True
+        if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+          val1 = i
+        else:
+          val1 = i - 1
+
+        pwf = wf_list[val1]
+        pwsh = pwf / 2
+        break
+
+      if i == n - 1 and a >= 0:
+        b = True
+
+    # In case increasing wavelength is not possible :
+    if b:
+      wfval = wfnew
+      wshval = wshnew
+      wf_list[0] = wfval
+      wsh_list[0] = wshval
+      for i in range(n):
+        wfval -= 40E-9 / n
+        wshval = wfval / 2
+        wf_list[i] = wfval
+        wsh_list[i] = wshval
+        phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wf_list[i], wsh_list[i])
+
+        if i > 0:
+          a = phasematch_list[i - 1] * phasematch_list[i]
+
+        # Setting up conditional to stop the iterations once it reaches root
+        if a < 0:
+          c = True
+          if abs(phasematch_list[i - 1]) > abs(phasematch_list[i]):
+            val1 = i
+          else:
+            val1 = i - 1
+
+          pwf = wf_list[val1]
+          pwsh = pwf / 2
+          break
+
+    # Now we will focus on generating for spectrum
+    wfval = wfnew - 40E-9
+    wshval = wfval / 2
+    eff_list = np.zeros(n)
+
+    for i in range(n):
+      wfval += 80E-9 / n
+      wshval = wfval / 2
+      wf_list[i] = wfval
+      wsh_list[i] = wshval
+      phasematch_list[i] = phasematch(polval, nf1val, nf2val, nshval, wf_list[i], wsh_list[i])
+      d = conv(phasematch_list[i])
+      eff_list[i] = d
+
+    # Calculate for peak wavelength as well as power loss
+    pwf = round(pwf, 10)
+    pwsh = round(pwsh, 10)
+
+    inten = powval/areaval
+
+    testb = conv(0)
+    testc = conv(phasematch(polval, nf1val, nf2val, nshval, wfnew, wshnew))
+
+    ratio = testc / testb
+    dBloss = 20 * math.log10(ratio)
+    dBloss = round(dBloss, 2)
+
+    amp = eff_list[val1]
+
+    # Create a new tkinter window for the graph
+    graph_window = tk.Toplevel()
+    graph_window.title("Results")
+    graph_window.geometry("1000x1000")
+
+    figure = Figure(figsize=(10, 4), dpi=100)
+    plot = figure.add_subplot(121)
+    plot2 = figure.add_subplot(122)
+
+    if c:
+      # Create a Matplotlib figure
+      plot.plot(wf_list, eff_list)
+      plot.set_title("Conversion Efficiency vs Pump Wavelength")
+      plot.set_xlabel("Pump Wavelength (m)")
+      plot.set_ylabel("Conversion Efficiency")
+
+      plot2.plot(wsh_list, eff_list)
+      plot2.set_title("Conversion Efficiency vs SH Wavelength")
+      plot2.set_xlabel("SH Wavelength (m)")
+      plot2.set_ylabel("Conversion Efficiency")
+
+      # Create a canvas for displaying the figure
+      canvas = FigureCanvasTkAgg(figure, master=graph_window)
+      canvas.draw()
+      canvas.get_tk_widget().pack()
+      tk.Label(graph_window, text="Peak Pump Wavelength", font=('Arial', 12)).place(x=50, y=420)
+      tk.Label(graph_window, text="Peak SH Wavelength", font=('Arial', 12)).place(x=50, y=450)
+      tk.Label(graph_window, text="Conversion Efficiency", font=('Arial', 12)).place(x=50, y=480)
+      #tk.Label(graph_window, text="Beam Intensity", font=('Arial', 12)).place(x=50, y=510)
+
+      tk.Label(graph_window, text=f"{pwf} m", font=('Arial', 12)).place(x=250, y=420)
+      tk.Label(graph_window, text=f"{pwsh} m", font=('Arial', 12)).place(x=250, y=450)
+      tk.Label(graph_window, text=f"{amp}", font=('Arial', 12)).place(x=250, y=480)
+      tk.Label(graph_window, text=f"{inten} W/m\u00b2", font=('Arial', 12)).place(x=160, y=510)
+
+    else:
+      tk.Label(graph_window, text="No Phase Matching", font=('Arial', 24)).place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+
+
+#Now we start to deal with label and entry based on radiobutton and checkboxes (We force the users to input only refractive index, which they can calculate from other calculation for the required parameter)
+def create_input_radio1():
+  #Define Parameter
+  temp = tk.Label(root, text="Temperature", font=('Arial', 12))
+  wf = tk.Label(root, text="Pump Wavelength", font=('Arial', 12))
+  nf1 = tk.Label(root, text="Refractive Index Pump Wave", font=('Arial', 12))
+  nf2 = tk.Label(root, text="Refractive Index Fundamental Wave", font=('Arial', 12))
+  nsh = tk.Label(root, text="Refractive Index SH Wave", font=('Arial', 12))
+
+  pol = tk.Label(root, text="Poling Period", font=('Arial', 12))
+
+#Parameter location
+  wf.place(x=50, y=140)
+  nf1.place(x=50, y=170)
+  nf2.place(x=50, y=200)
+  nsh.place(x=50, y=230)
+
+  pol.place(x=50, y=290)
+
+
+#Label
+  wflabel = tk.Label(root, text="m", font=('Arial', 12))
+
+  pollabel = tk.Label(root, text="m", font=('Arial', 12))
+
+#Label location
+  wflabel.place(x=520, y=140)
+
+  pollabel.place(x=520, y=290)
+
+#Entry value
+  wfvalue = tk.StringVar()
+  nf1value = tk.StringVar()
+  nf2value = tk.StringVar()
+  nshvalue = tk.StringVar()
+
+
+
+  #Input entry
+  wfentry = tk.Entry(root, textvariable = wfvalue, font = ("Arial", 18), width = 8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nf1entry = tk.Entry(root, textvariable = nf1value, font = ("Arial", 18), width = 8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nf2entry = tk.Entry(root, textvariable = nf2value, font = ("Arial", 18), width = 8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nshentry = tk.Entry(root, textvariable = nshvalue, font = ("Arial", 18), width = 8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+
+  #Location of the entry
+  wfentry.place(x=400, y=140)
+  nf1entry.place(x=400, y=170)
+  nf2entry.place(x=400, y=200)
+  nshentry.place(x=400, y=230)
+
+  return [wf, wfentry, nf1, nf1entry, nf2, nf2entry, nsh, nshentry, wflabel, pollabel, pol]
+
+def create_input_radio2():
+    polarr_radiox = tk.Radiobutton(root, text="x-axis", variable=pol_arrange,
+                                                   value="x", command=update_input_widgets)
+    polarr_radiox.place(x=150, y=80)
+
+    polarr_radioy = tk.Radiobutton(root, text="y-axis", variable=pol_arrange,
+                                                   value="y", command=update_input_widgets)
+    polarr_radioy.place(x=250, y=80)
+
+    polarr_radioz = tk.Radiobutton(root, text="z-axis", variable=pol_arrange,
+                                                   value="z", command=update_input_widgets)
+    polarr_radioz.place(x=350, y=80)
+
+  # Define Parameter
+    userpol = tk.Label(root, text="Reference Poling Period", font=('Arial', 12))
+    usertemp = tk.Label(root, text="Reference Temperature", font=('Arial', 12))
+    acttemp = tk.Label(root, text="Actual Temperature", font=('Arial', 12))
+    alpha = tk.Label(root, text="Thermal Expansion Coefficient", font=('Arial', 12))
+
+    actpol = tk.Label(root, text="Poling Period", font=('Arial', 12))
+
+    # Parameter location
+    userpol.place(x=50, y=150)
+    usertemp.place(x=50, y=180)
+    acttemp.place(x=50, y=210)
+    alpha.place(x=50, y=240)
+
+    actpol.place(x=50, y=290)
+
+    #Define Labeling
+    userpollabel = tk.Label(root, text="m", font=('Arial', 12))
+    usertemplabel = tk.Label(root, text="K", font=('Arial', 12))
+    acttemplabel = tk.Label(root, text="K", font=('Arial', 12))
+    alphalabel = tk.Label(root, text="K\u207B\u00B9", font=('Arial', 12))
+
+    actpollabel = tk.Label(root, text="m", font=('Arial', 12))
+
+    #Labeling location
+    userpollabel.place(x=520, y=150)
+    usertemplabel.place(x=520, y=180)
+    acttemplabel.place(x=520, y=210)
+    alphalabel.place(x=520, y=240)
+
+    actpollabel.place(x=520, y=290)
+
+    # Now we assign possible values for each entry
+    userpolvalue = tk.StringVar()
+    usertempvalue = tk.StringVar()
+    acttempvalue = tk.StringVar()
+    alphavalue = tk.StringVar()
+
+    # Input entry
+    userpolentry = tk.Entry(root, textvariable=userpolvalue, font=("Arial", 18), width=8,
+                            validate="key", validatecommand=(root.register(validate_entry), "%P"))
+    usertempentry = tk.Entry(root, textvariable=usertempvalue, font=("Arial", 18), width=8,
+                             validate="key", validatecommand=(root.register(validate_entry), "%P"))
+    acttempentry = tk.Entry(root, textvariable=acttempvalue, font=("Arial", 18), width=8,
+                            validate="key", validatecommand=(root.register(validate_entry), "%P"))
+    alphaentry = tk.Entry(root, textvariable=alphavalue, font=("Arial", 18), width=8, validate="key",
+                        validatecommand=(root.register(validate_entry), "%P"))
+
+    # Location of the entry
+    userpolentry.place(x=400, y=150)
+    usertempentry.place(x=400, y=180)
+    acttempentry.place(x=400, y=210)
+    alphaentry.place(x=400, y=240)
+
+    return [userpol, userpolentry, usertemp, usertempentry, acttemp, acttempentry, alpha, alphaentry, actpol, userpollabel, usertemplabel, acttemplabel, alphalabel, actpollabel, polarr_radiox, polarr_radioy, polarr_radioz]
+
+#Proceed to calculation of refractive index using z or d
+def create_input_radio3():
+  #Define Parameter
+  temp = tk.Label(root, text="Temperature", font=('Arial', 12))
+  wf = tk.Label(root, text="Pump Wavelength", font=('Arial', 12))
+  pol = tk.Label(root, text="Poling Period", font=('Arial', 12))
+  diff_ny = tk.Label(root, text="Step Refractive Index Difference (y-axis)", font=('Arial', 12))
+  diff_nz = tk.Label(root, text="Step Refractive Index Difference (z-axis)", font=('Arial', 12))
+  d = tk.Label(root, text="Waveguide Depth", font=('Arial', 12))
+  z = tk.Label(root, text="Diffusion Depth", font=('Arial', 12))
+
+  diff_nznew = tk.Label(root, text="Step Refractive Index Difference (z-axis)", font=('Arial', 12))
+  znew = tk.Label(root, text="Waveguide depth (z-axis)", font=('Arial', 12))
+  nf1 = tk.Label(root, text="Refractive Index Pump Wave", font=('Arial', 12))
+  nf2 = tk.Label(root, text="Refractive Index Fundamental Wave", font=('Arial', 12))
+  nsh = tk.Label(root, text="Refractive Index SH Wave", font=('Arial', 12))
+
+  #Parameter location
+  temp.place(x=50, y=110)
+  wf.place(x=50, y=140)
+  pol.place(x=50, y=170)
+  diff_ny.place(x=50, y=200)
+  diff_nz.place(x=50, y=230)
+  d.place(x=50, y=260)
+  z.place(x=50, y=290)
+
+  znew.place(x=50, y=350)
+  diff_nznew.place(x=50, y=380)
+  nf1.place(x=50, y=410)
+  nf2.place(x=50, y=440)
+  nsh.place(x=50, y=470)
+
+  #Define labelling
+  templabel = tk.Label(root, text="K", font=('Arial', 12))
+  wflabel = tk.Label(root, text="m", font=('Arial', 12))
+  pollabel = tk.Label(root, text="m", font=('Arial', 12))
+  dlabel = tk.Label(root, text="m", font=('Arial', 12))
+  zlabel = tk.Label(root, text="m", font=('Arial', 12))
+
+  znewlabel = tk.Label(root, text="m", font=('Arial', 12))
+
+
+  templabel.place(x=520, y=110)
+  wflabel.place(x=520, y=140)
+  pollabel.place(x=520, y=170)
+  dlabel.place(x=520, y=260)
+  zlabel.place(x=520, y=290)
+
+  znewlabel.place(x=520, y=350)
+
+  #Define Value for Entry
+  tempvalue = tk.StringVar()
+  wfvalue = tk.StringVar()
+  polvalue = tk.StringVar()
+  diff_nyvalue = tk.StringVar()
+  diff_nzvalue = tk.StringVar()
+  dvalue = tk.StringVar()
+  zvalue = tk.StringVar()
+
+  tempentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = tempvalue, font = ("Arial", 18), width = 8)
+  wfentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = wfvalue, font = ("Arial", 18), width = 8)
+  polentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = polvalue, font = ("Arial", 18), width = 8)
+  diff_nyentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = diff_nyvalue, font = ("Arial", 18), width = 8)
+  diff_nzentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = diff_nzvalue, font = ("Arial", 18), width = 8)
+  dentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = dvalue, font = ("Arial", 18), width = 8)
+  zentry = tk.Entry(root, validate = "key", validatecommand=(root.register(validate_entry), "%P"), textvariable = zvalue, font = ("Arial", 18), width = 8)
+
+  tempentry.place(x=400, y=110)
+  wfentry.place(x=400, y=140)
+  polentry.place(x=400, y=170)
+  diff_nyentry.place(x=400, y=200)
+  diff_nzentry.place(x=400, y=230)
+  dentry.place(x=400, y=260)
+  zentry.place(x=400, y=290)
+
+  return [temp, tempentry, wf, wfentry, pol, polentry, diff_ny, diff_nyentry, diff_nz, diff_nzentry, d, dentry, z, zentry, diff_nznew, znew, nf1, nf2, nsh, templabel, wflabel, pollabel, dlabel, zlabel, znewlabel]
+
+def create_input_radio4():
+  #Define Parameter
+  pol = tk.Label(root, text="Poling Period", font=('Arial', 12))
+  nf1 = tk.Label(root, text="Refractive Index Pump Wave", font=('Arial', 12))
+  nf2 = tk.Label(root, text="Refractive Index Fundamental Wave", font=('Arial', 12))
+  nsh = tk.Label(root, text="Refractive Index SH Wave", font=('Arial', 12))
+
+  wf = tk.Label(root, text="Pump Wavelength", font=('Arial', 12))
+  wsh = tk.Label(root, text="SH Wavelength", font=('Arial', 12))
+
+  #Parameter Location
+  pol.place(x=50, y=110)
+  nf1.place(x=50, y=140)
+  nf2.place(x=50, y=170)
+  nsh.place(x=50, y=200)
+
+  wf.place(x=50, y=290)
+  wsh.place(x=50, y=320)
+
+
+  #Define unit
+  pollabel = tk.Label(root, text="m", font=('Arial', 12))
+  wflabel = tk.Label(root, text="m", font=('Arial', 12))
+  wshlabel = tk.Label(root, text="m", font=('Arial', 12))
+
+  #Unit location
+  pollabel.place(x=520, y=110)
+  wflabel.place(x=520, y=290)
+  wshlabel.place(x=520, y=320)
+
+  # Now we assign possible values for each entry
+  polvalue = tk.StringVar()
+  nf1value = tk.StringVar()
+  nf2value = tk.StringVar()
+  nshvalue = tk.StringVar()
+
+
+  polentry = tk.Entry(root, textvariable=polvalue, font=("Arial", 18), width=8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nf1entry = tk.Entry(root, textvariable=nf1value, font=("Arial", 18), width=8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nf2entry = tk.Entry(root, textvariable=nf2value, font=("Arial", 18), width=8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+  nshentry = tk.Entry(root, textvariable=nshvalue, font=("Arial", 18), width=8, validate = "key", validatecommand=(root.register(validate_entry), "%P"))
+
+  polentry.place(x=400, y=110)
+  nf1entry.place(x=400, y=140)
+  nf2entry.place(x=400, y=170)
+  nshentry.place(x=400, y=200)
+
+  return [pol, polentry, nf1, nf1entry, nf2, nf2entry, nsh, nshentry, wf, wsh, pollabel, wflabel, wshlabel]
+
+def create_input_radio5():
+  # Define Labeling
+  pol = tk.Label(root, text="Poling Period", font=('Arial', 12))
+  nf1 = tk.Label(root, text="Pump RI", font=('Arial', 12))
+  nf2 = tk.Label(root, text="Fundamental RI", font=('Arial', 12))
+  nsh = tk.Label(root, text="SH RI", font=('Arial', 12))
+  wf = tk.Label(root, text="Pump Wavelength", font=('Arial', 12))
+  len = tk.Label(root, text="Waveguide Length", font=('Arial', 12))
+  pow = tk.Label(root, text="Pump Power ", font=('Arial', 12))
+  area = tk.Label(root, text="Waveguide Area", font=('Arial', 12))
+  deff = tk.Label(root, text="Nonlinear Coefficient", font=('Arial', 12))
+
+  # Label location
+  pol.place(x=50, y=110)
+  nf1.place(x=50, y=140)
+  nf2.place(x=50, y=170)
+  nsh.place(x=50, y=200)
+  wf.place(x=50, y=230)
+  len.place(x=50, y=260)
+  pow.place(x=50, y=290)
+  area.place(x=50, y=320)
+  deff.place(x=50, y=350)
+
+
+  #Define Unit
+  pollabel = tk.Label(root, text="m", font=('Arial', 12))
+  wflabel = tk.Label(root, text="m", font=('Arial', 12))
+  lenlabel = tk.Label(root, text="m", font=('Arial', 12))
+  powlabel = tk.Label(root, text="W", font=('Arial', 12))
+  arealabel = tk.Label(root, text="m\u00b2", font=('Arial', 12))
+  defflabel = tk.Label(root, text="m/V", font=('Arial', 12))
+
+  #Unit Location
+  pollabel.place(x=520, y=110)
+  wflabel.place(x=520, y=230)
+  lenlabel.place(x=520, y=260)
+  powlabel.place(x=520, y=290)
+  arealabel.place(x=520, y=320)
+  defflabel.place(x=520, y=350)
+
+  polvalue = tk.StringVar()
+  nf1value = tk.StringVar()
+  nf2value = tk.StringVar()
+  nshvalue = tk.StringVar()
+  wfvalue = tk.StringVar()
+  lenvalue = tk.StringVar()
+  powvalue = tk.StringVar()
+  areavalue = tk.StringVar()
+  deffvalue = tk.StringVar()
+
+  polentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                       textvariable=polvalue, font=("Arial", 18), width=8)
+  nf1entry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                      textvariable=nf1value, font=("Arial", 18), width=8)
+  nf2entry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                      textvariable=nf2value, font=("Arial", 18), width=8)
+  nshentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                      textvariable=nshvalue, font=("Arial", 18), width=8)
+  wfentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                          textvariable=wfvalue, font=("Arial", 18), width=8)
+  lenentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"), textvariable=lenvalue,
+                    font=("Arial", 18), width=8)
+  powentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                      textvariable=powvalue,
+                      font=("Arial", 18), width=8)
+  areaentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                      textvariable=areavalue,
+                      font=("Arial", 18), width=8)
+  deffentry = tk.Entry(root, validate="key", validatecommand=(root.register(validate_entry), "%P"),
+                       textvariable=deffvalue,
+                       font=("Arial", 18), width=8)
+
+  polentry.place(x=400, y=110)
+  nf1entry.place(x=400, y=140)
+  nf2entry.place(x=400, y=170)
+  nshentry.place(x=400, y=200)
+  wfentry.place(x=400, y=230)
+  lenentry.place(x=400, y=260)
+  powentry.place(x=400, y=290)
+  areaentry.place(x=400, y=320)
+  deffentry.place(x=400, y=350)
+
+  return [pol, polentry, nf1, nf1entry, nf2, nf2entry, nsh, nshentry, wf, wfentry, len, lenentry, pow, powentry, area, areaentry, deff, deffentry, pollabel, wflabel, lenlabel, powlabel, arealabel, defflabel]
+
+
+
+calculation_type_label = tk.Label(root, text="Calculation type:")
+calculation_type_label.place(x=50, y=20)
+
+pol_arrange = tk.StringVar()
+pol_arrange.set("x")
+
+calculation_type = tk.StringVar()
+calculation_type.set("calculation_type_1")
+
+calculation_type_radio_button_1 = tk.Radiobutton(root, text="Ideal Poling Period", variable=calculation_type, value="calculation_type_1", command=update_input_widgets)
+calculation_type_radio_button_1.place(x=150, y=20)
+
+calculation_type_radio_button_2 = tk.Radiobutton(root, text = "Actual Poling Period", variable=calculation_type, value="calculation_type_2", command=update_input_widgets)
+calculation_type_radio_button_2.place(x=150, y=50)
+
+calculation_type_radio_button_3 = tk.Radiobutton(root, text="Refractive Indices", variable=calculation_type, value="calculation_type_3", command=update_input_widgets)
+calculation_type_radio_button_3.place(x=280, y=20)
+
+calculation_type_radio_button_4 = tk.Radiobutton(root, text = "Wavelength", variable=calculation_type, value="calculation_type_4", command=update_input_widgets)
+calculation_type_radio_button_4.place(x=400, y=20)
+
+calculation_type_radio_button_4 = tk.Radiobutton(root, text = "Graph", variable=calculation_type, value="calculation_type_5", command=update_input_widgets)
+calculation_type_radio_button_4.place(x=500, y=20)
+
+tk.Button(text="Calculate", font=('Arial', 12), command = Calculate).place(x=590, y=110)
+tk.Button(root, text='Exit', command=lambda:exit(),font=('Arial',12), width = 8).place(x=590,y=230)
+
+# Create the input widgets for the initial calculation type (type 1)
+input_widgets = create_input_radio1()
+
+# Add the input widgets to the window
+for widget in input_widgets:
+    widget.place()
+
+
+root.mainloop()
